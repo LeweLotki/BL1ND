@@ -5,9 +5,11 @@
 
 #include "driver/gpio.h"
 
+class StandardOutput;
+
 class NumPad {
 public:
-    NumPad();
+    NumPad(StandardOutput& output);
 
     void run();
 
@@ -18,6 +20,8 @@ public:
 private:
     void initGpio();
     int readKey();
+
+    StandardOutput& output_;
 
     static constexpr gpio_num_t ROWS[4] = {
         GPIO_NUM_13,

@@ -1,13 +1,14 @@
 #include "numpad.hpp"
 
+#include "standard_output.hpp"
+
 #include "freertos/task.h"
 
 #include "esp_rom_sys.h"
 
-#include <cstdio>
-
-NumPad::NumPad()
-    : key_queue_(xQueueCreate(1, sizeof(int)))
+NumPad::NumPad(StandardOutput& output)
+    : output_(output)
+    , key_queue_(xQueueCreate(1, sizeof(int)))
 {
 }
 
@@ -72,7 +73,7 @@ void NumPad::run()
 
         if (key != 0 && last_key == 0) {
 
-            printf("Pressed: %d\n", key);
+            output_.printf("Pressed: %d\n", key);
 
             xQueueOverwrite(key_queue_, &key);
         }

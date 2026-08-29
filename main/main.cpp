@@ -1,11 +1,18 @@
 #include "led.hpp"
 #include "numpad.hpp"
+#include "standard_output.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static NumPad numpad;
+static StandardOutput output;
+static NumPad numpad(output);
 static Led led(numpad);
+
+static void standard_output_task(void* parameter)
+{
+    static_cast<StandardOutput*>(parameter)->run();
+}
 
 static void numpad_task(void* parameter)
 {
@@ -19,6 +26,15 @@ static void led_task(void* parameter)
 
 extern "C" void app_main()
 {
+    xTaskCreate(
+        standard_output_task,
+        "standard_output_task",
+        2048,
+        &output,
+        5,
+        nullptr
+    );
+
     xTaskCreate(
         numpad_task,
         "numpad_task",
