@@ -1,27 +1,25 @@
 #pragma once
 
+#include "keypad_layout.hpp"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
 #include "driver/gpio.h"
 
-class StandardOutput;
-
 class NumPad {
 public:
-    NumPad(StandardOutput& output);
+    NumPad();
 
     void run();
 
-    bool receiveKey(int& key, TickType_t timeout);
+    bool receiveKey(char& key, TickType_t timeout);
 
-    bool waitForNewKey(int milliseconds, int& new_key);
+    bool waitForNewKey(int milliseconds, char& new_key);
 
 private:
     void initGpio();
-    int readKey();
-
-    StandardOutput& output_;
+    char readKey();
 
     static constexpr gpio_num_t ROWS[4] = {
         GPIO_NUM_13,

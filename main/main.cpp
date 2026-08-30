@@ -1,3 +1,4 @@
+#include "game.hpp"
 #include "led.hpp"
 #include "numpad.hpp"
 #include "standard_output.hpp"
@@ -6,8 +7,9 @@
 #include "freertos/task.h"
 
 static StandardOutput output;
-static NumPad numpad(output);
-static Led led(numpad);
+static NumPad numpad;
+static Led led;
+static Game game(numpad, led, output);
 
 static void standard_output_task(void* parameter)
 {
@@ -22,6 +24,11 @@ static void numpad_task(void* parameter)
 static void led_task(void* parameter)
 {
     static_cast<Led*>(parameter)->run();
+}
+
+static void game_task(void* parameter)
+{
+    static_cast<Game*>(parameter)->run();
 }
 
 extern "C" void app_main()
@@ -50,6 +57,15 @@ extern "C" void app_main()
         2048,
         &led,
         4,
+        nullptr
+    );
+
+    xTaskCreate(
+        game_task,
+        "game_task",
+        2048,
+        &game,
+        5,
         nullptr
     );
 }

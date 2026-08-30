@@ -1,12 +1,9 @@
 #include "led.hpp"
 
-#include "numpad.hpp"
-
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-Led::Led(NumPad& numpad)
-    : numpad_(numpad)
+Led::Led()
+    : command_queue_(xQueueCreate(8, sizeof(uint8_t)))
 {
 }
 
@@ -17,46 +14,28 @@ void Led::initGpio()
     gpio_set_level(PIN_, 0);
 }
 
-void Led::blink(int times)
+void Led::blink()
 {
-    for (int i = 0; i < times; i++) {
+    gpio_set_level(PIN_, 1);
+    vTaskDelay(pdMS_TO_TICKS(250));
+    gpio_set_level(PIN_, 0);
+    vTaskDelay(pdMS_TO_TICKS(250));
+}
 
-        gpio_set_level(PIN_, 1);
-
-        vTaskDelay(pdMS_TO_TICKS(250));
-
-        gpio_set_level(PIN_, 0);
-
-        vTaskDelay(pdMS_TO_TICKS(250));
-    }
+bool Led::blinkOnce()
+{
+    const uint8_t command = 1;
+    return xQueueSend(command_queue_, &command, portMAX_DELAY) == pdTRUE;
 }
 
 void Led::run()
 {
     initGpio();
 
-    int key_a = 0;
-    int key_b = 0;
-    bool is_addition_pressed = false;
-
     while (true) {
-
-        numpad_.receiveKey(key_a, portMAX_DELAY);
-
-        if (key_a == -1) {
-            is_addition_pressed = true;
-        }
-        else if (is_addition_pressed && key_b > 0 && key_a > 0) {
-
-            blink(key_a + key_b);
-
-            key_a = 0;
-            key_b = 0;
-            is_addition_pressed = false;
-        }
-        else if (key_a > 0) {
-            key_b = key_a;
-            key_a = 0;
+        uint8_t command = 0;
+        if (xQueueReceive(command_queue_, &command, portMAX_DELAY) == pdTRUE) {
+            blink();
         }
     }
 }

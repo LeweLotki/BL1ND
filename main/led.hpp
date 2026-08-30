@@ -1,20 +1,22 @@
 #pragma once
 
-#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
-class NumPad;
+#include "driver/gpio.h"
 
 class Led {
 public:
-    Led(NumPad& numpad);
+    Led();
 
     void run();
+    bool blinkOnce();
 
 private:
     void initGpio();
-    void blink(int times);
-
-    NumPad& numpad_;
+    void blink();
 
     static constexpr gpio_num_t PIN_ = GPIO_NUM_2;
+
+    QueueHandle_t command_queue_;
 };
