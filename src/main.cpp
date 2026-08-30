@@ -1,3 +1,5 @@
+#include "main.hpp"
+
 #include "board_server.hpp"
 #include "board_snapshot.hpp"
 #include "game.hpp"

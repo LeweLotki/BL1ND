@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+        "game_logic/chess_board.cpp"
+        "game_logic/chess_game.cpp"
+        "game_logic/game.cpp"
+        "peripherals/led.cpp"
+        "peripherals/numpad.cpp"
+        "peripherals/standard_output.cpp"
+        "server/board_page.cpp"
+        "server/board_snapshot.cpp"
+        "server/board_server.cpp"
+        "server/wifi_access_point.cpp"
+    INCLUDE_DIRS
+        "."
+        "game_logic"
+        "peripherals"
+        "server"
+    REQUIRES
+        esp_driver_gpio
+        esp_event
+        esp_http_server
+        esp_netif
+        esp_wifi
+        nvs_flash
+)

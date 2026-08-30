@@ -7,12 +7,18 @@ enable_testing()
 add_executable(
     chess_tests
     test_chess.cpp
-    ../main/board_page.cpp
-    ../main/chess_board.cpp
-    ../main/chess_game.cpp
+    ../src/server/board_page.cpp
+    ../src/game_logic/chess_board.cpp
+    ../src/game_logic/chess_game.cpp
 )
 
-target_include_directories(chess_tests PRIVATE ../main)
+target_include_directories(
+    chess_tests
+    PRIVATE
+        ../src/game_logic
+        ../src/peripherals
+        ../src/server
+)
 target_compile_features(chess_tests PRIVATE cxx_std_17)
 target_compile_options(chess_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
