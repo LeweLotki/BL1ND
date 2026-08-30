@@ -13,6 +13,9 @@ idf_component_register(
         "game_logic/pieces/rook.cpp"
         "game_logic/pieces/queen.cpp"
         "game_logic/pieces/king.cpp"
+        "link/link_protocol.cpp"
+        "link/link_session.cpp"
+        "link/bluetooth_link.cpp"
         "peripherals/led.cpp"
         "peripherals/numpad.cpp"
         "peripherals/standard_output.cpp"
@@ -24,11 +27,14 @@ idf_component_register(
         "."
         "game_logic"
         "game_logic/pieces"
+        "link"
         "peripherals"
         "server"
     REQUIRES
+        bt
         esp_driver_gpio
         esp_event
+        esp_hw_support
         esp_http_server
         esp_netif
         esp_wifi

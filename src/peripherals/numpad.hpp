@@ -9,11 +9,14 @@
 
 class NumPad {
 public:
+    static constexpr UBaseType_t QUEUE_LENGTH = 8;
+
     NumPad();
 
     void run();
 
     bool receiveKey(char& key, TickType_t timeout);
+    QueueHandle_t queue() const;
 
     bool waitForNewKey(int milliseconds, char& new_key);
 

@@ -329,6 +329,12 @@ const char* describe(
     case MoveError::GameOver:
         snprintf(out, out_size, "game is over, press reset");
         break;
+    case MoveError::NotYourSide:
+        snprintf(out, out_size, "it is your opponent's turn");
+        break;
+    case MoveError::NotLinked:
+        snprintf(out, out_size, "link is down");
+        break;
     }
     return out;
 }

@@ -5,7 +5,7 @@
 #include "esp_rom_sys.h"
 
 NumPad::NumPad()
-    : key_queue_(xQueueCreate(8, sizeof(char)))
+    : key_queue_(xQueueCreate(QUEUE_LENGTH, sizeof(char)))
 {
 }
 
@@ -53,18 +53,14 @@ void NumPad::run()
 {
     initGpio();
 
-    char last_key = KeypadLayout::NO_KEY;
+    KeypadLayout::InputTracker input;
 
     while (true) {
 
-        const char key = readKey();
-
-        if (key != KeypadLayout::NO_KEY
-            && last_key == KeypadLayout::NO_KEY) {
-            xQueueSend(key_queue_, &key, portMAX_DELAY);
+        const char event = input.update(readKey());
+        if (event != KeypadLayout::NO_KEY) {
+            xQueueSend(key_queue_, &event, portMAX_DELAY);
         }
-
-        last_key = key;
 
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -73,6 +69,11 @@ void NumPad::run()
 bool NumPad::receiveKey(char& key, TickType_t timeout)
 {
     return xQueueReceive(key_queue_, &key, timeout) == pdTRUE;
+}
+
+QueueHandle_t NumPad::queue() const
+{
+    return key_queue_;
 }
 
 bool NumPad::waitForNewKey(int milliseconds, char& new_key)

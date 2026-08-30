@@ -16,6 +16,7 @@ GameEvent emptyEvent(GameEventType type)
         MoveError::None,
         PositionStatus::Normal,
         {},
+        {},
     };
 }
 
@@ -42,6 +43,9 @@ ChessGame::ChessGame()
     , promotion_pending_(false)
     , pending_move_({})
     , game_result_(PositionStatus::Normal)
+    , has_owned_color_(false)
+    , owned_color_(Color::White)
+    , link_available_(false)
 {
 }
 
@@ -52,6 +56,9 @@ ChessGame::ChessGame(const ChessBoard& board)
     , promotion_pending_(false)
     , pending_move_({})
     , game_result_(PositionStatus::Normal)
+    , has_owned_color_(false)
+    , owned_color_(Color::White)
+    , link_available_(false)
 {
 }
 
@@ -101,6 +108,47 @@ GameEvent ChessGame::handleKey(char key)
 const ChessBoard& ChessGame::board() const
 {
     return board_;
+}
+
+unsigned int ChessGame::moveNumber() const
+{
+    return move_number_;
+}
+
+void ChessGame::setOwnedColor(Color color)
+{
+    has_owned_color_ = true;
+    owned_color_ = color;
+    link_available_ = true;
+}
+
+void ChessGame::setLinkAvailable(bool available)
+{
+    link_available_ = available;
+}
+
+void ChessGame::clearOwnedColor()
+{
+    has_owned_color_ = false;
+    link_available_ = false;
+}
+
+void ChessGame::adoptPosition(
+    const ChessBoard& board,
+    unsigned int move_number
+)
+{
+    board_ = board;
+    move_number_ = move_number == 0 ? 1 : move_number;
+    digit_count_ = 0;
+    promotion_pending_ = false;
+    pending_move_ = {};
+    game_result_ = ChessRules::status(board_);
+}
+
+void ChessGame::resetGame()
+{
+    reset();
 }
 
 bool ChessGame::formatOutput(
@@ -191,6 +239,7 @@ GameEvent ChessGame::processMove()
         MoveError::None,
         PositionStatus::Normal,
         {},
+        {},
     };
     formatCoordinate(from, to, event.notation);
 
@@ -207,6 +256,28 @@ GameEvent ChessGame::processMove()
             sizeof(event.error_description)
         );
         return event;
+    }
+
+    if (has_owned_color_) {
+        if (!link_available_) {
+            event.type = GameEventType::MoveRejected;
+            event.error = MoveError::NotLinked;
+        }
+        else if (board_.sideToMove() != owned_color_) {
+            event.type = GameEventType::MoveRejected;
+            event.error = MoveError::NotYourSide;
+        }
+        if (event.type == GameEventType::MoveRejected) {
+            ChessRules::describe(
+                event.error,
+                board_,
+                from,
+                to,
+                event.error_description,
+                sizeof(event.error_description)
+            );
+            return event;
+        }
     }
 
     const char moving = board_.pieceAt(from);
@@ -256,6 +327,7 @@ GameEvent ChessGame::finishMove(Move move)
         MoveError::None,
         ChessRules::status(board_),
         {},
+        move,
     };
     ChessNotation::format(before, move, board_, event.notation);
     if (event.status == PositionStatus::Checkmate) {
@@ -271,6 +343,52 @@ GameEvent ChessGame::finishMove(Move move)
         game_result_ = event.status;
     }
     ++move_number_;
+    return event;
+}
+
+GameEvent ChessGame::applyRemoteMove(
+    Square from,
+    Square to,
+    char promotion
+)
+{
+    GameEvent event = {
+        GameEventType::MoveAccepted,
+        {},
+        move_number_,
+        MoveError::None,
+        PositionStatus::Normal,
+        {},
+        {},
+    };
+    formatCoordinate(from, to, event.notation);
+    if (game_result_ == PositionStatus::Checkmate
+        || game_result_ == PositionStatus::Stalemate) {
+        event.type = GameEventType::MoveRejected;
+        event.error = MoveError::GameOver;
+    }
+    else {
+        Move resolved = {};
+        event.error = ChessRules::validate(
+            board_,
+            from,
+            to,
+            promotion,
+            resolved
+        );
+        if (event.error == MoveError::None) {
+            return finishMove(resolved);
+        }
+        event.type = GameEventType::MoveRejected;
+    }
+    ChessRules::describe(
+        event.error,
+        board_,
+        from,
+        to,
+        event.error_description,
+        sizeof(event.error_description)
+    );
     return event;
 }
 

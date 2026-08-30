@@ -1,51 +1,4 @@
-# chess-move-entry Specification
-
-## Purpose
-TBD - created by archiving change create-chess-task. Update Purpose after archive.
-## Requirements
-### Requirement: Every physical key is distinguishable from no key
-
-The keypad scanner SHALL report a distinct code for each of the 16 keys in the matrix, and SHALL use a sentinel value that no key can produce to report that nothing is pressed. In particular the key at row 3 / column 0 SHALL be reported with its own code.
-
-#### Scenario: Reset key is reported
-
-- **WHEN** the key at row 3, column 0 is pressed
-- **THEN** the scanner reports the reset key code
-- **AND** that code differs from the code reported when no key is pressed
-
-#### Scenario: No key pressed
-
-- **WHEN** no key in the matrix is pressed
-- **THEN** the scanner reports the "nothing pressed" sentinel
-
-#### Scenario: Every key has a unique code
-
-- **WHEN** each of the 16 keys is pressed in turn
-- **THEN** each press reports a code unique to that key
-
-### Requirement: A move is entered as four digits
-
-The system SHALL accumulate four keypresses in the range 1–8 as a coordinate move, in the order from-file, from-rank, to-file, to-rank. A digit `d` SHALL map to file or rank index `d - 1`, so 1 maps to file `a` or rank 1 and 8 maps to file `h` or rank 8. On the fourth digit the move SHALL be judged; before that no move SHALL be judged. A move that is not a pawn move to the last rank SHALL be completed on the fourth digit, either accepted or rejected. A legal pawn move to the last rank SHALL instead leave the entry awaiting a promotion choice.
-
-#### Scenario: Four digits complete a move
-
-- **WHEN** the player presses 5, 2, 5, 4 from the starting position
-- **THEN** the move e2 to e4 is judged and accepted
-
-#### Scenario: Partial entry does not act
-
-- **WHEN** the player has pressed fewer than four digits
-- **THEN** no move is judged, no output line is printed, the LED does not signal, and the board is unchanged
-
-#### Scenario: Entry restarts after a completed move
-
-- **WHEN** a move has just been completed, whether accepted or rejected
-- **THEN** the next digit pressed begins a new four-digit move
-
-#### Scenario: Fourth digit of a promotion does not complete the move
-
-- **WHEN** the four digits describe a legal pawn move to the last rank
-- **THEN** the move is not yet applied and the entry awaits a promotion choice
+## MODIFIED Requirements
 
 ### Requirement: Keys outside the digit range are ignored during entry
 
@@ -163,15 +116,6 @@ The LED SHALL signal the outcome of every completed move with one of two disting
 - **WHEN** a move received over the link is applied
 - **THEN** the LED blinks once, as it would for a move entered on the keypad
 
-### Requirement: Keypresses in a move are not dropped
-
-The path from the keypad scanner to the move-entry logic SHALL buffer keypresses in first-in-first-out order and SHALL NOT discard an earlier press because a later one arrived. All four digits of a move SHALL be delivered in the order they were pressed.
-
-#### Scenario: Rapid entry preserves order
-
-- **WHEN** the player presses four digits in quick succession
-- **THEN** all four are received in the order pressed and the intended move is processed
-
 ### Requirement: Peripherals emit no key-level output
 
 The keypad SHALL NOT print a line to standard output for each keypress. Standard output SHALL carry move results, rejection messages, and link status — pairing, connection, colour assignment, disconnection, and position mismatches — and nothing else.
@@ -235,6 +179,8 @@ While a promotion choice is awaited, the system SHALL accept `A` for a queen, `B
 - **WHEN** a promotion choice becomes awaited
 - **THEN** a line is printed to standard output naming the pending move and the four available choices
 
+## ADDED Requirements
+
 ### Requirement: A three-second hold of B is reported as its own event
 
 The keypad scanner SHALL distinguish a press of `B` from a hold of `B`. A hold SHALL be reported once, three seconds after the key goes down, and SHALL NOT be reported again while the key remains down. The press meaning of `B` SHALL be reported on release, and only when the key was released before three seconds elapsed. No other key SHALL have its meaning deferred to release, and no other key SHALL produce a hold event.
@@ -287,4 +233,3 @@ When the device is linked to a peer, a completed four-digit entry SHALL be refus
 
 - **WHEN** the device holds no link and an entry is completed for either colour
 - **THEN** the entry is judged on legality alone
-

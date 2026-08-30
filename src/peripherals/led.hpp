@@ -1,5 +1,7 @@
 #pragma once
 
+#include "move.hpp"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -10,6 +12,9 @@ public:
     enum class BlinkPattern : uint8_t {
         Single,
         Error,
+        Linked,
+        ColorWhite,
+        ColorBlack,
     };
 
     Led();
@@ -17,6 +22,8 @@ public:
     void run();
     bool blinkOnce();
     bool blinkError();
+    bool blinkLinked();
+    bool announceColor(Color color);
 
 private:
     void initGpio();

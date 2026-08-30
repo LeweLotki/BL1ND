@@ -14,8 +14,9 @@ board preview for an arbiter or spectator.
 - Numbered move output over the serial console
 - Distinct LED confirmation and rejection patterns
 - One-key game reset
+- Optional two-board play over Bluetooth Low Energy with synchronized positions
 - Self-refreshing, phone-sized board preview over an ESP32 Wi-Fi access point
-- Host-side tests for the platform-independent chess and HTML-rendering code
+- Host-side tests for chess, the link protocol, synchronization, and HTML rendering
 
 ## Hardware
 
@@ -88,6 +89,43 @@ Press `*` at any time to restore the starting position, reset move numbering
 to 1, and discard a partially entered move. Keys other than `1`–`8` and `*`
 are ignored without clearing the partial entry.
 
+The `B` promotion choice is reported when the key is released, rather than
+when it is first pressed. This allows the same key to distinguish a short rook
+promotion choice from the three-second Bluetooth gesture described below.
+
+## Playing against another board
+
+Hold `B` continuously for three seconds on both boards. For the next 30
+seconds, each board advertises and scans for another `bl1nd` board. They need
+no phone, address, passcode, or designated host. When the handshake completes:
+
+1. Both LEDs blink five times.
+2. One board is randomly assigned White and the other Black.
+3. One long blink announces White; two long blinks announce Black.
+
+Only the board assigned the side to move accepts an entry. Entering four
+digits on the other board produces the rapid rejection pattern and prints
+`it is your opponent's turn`. An accepted move is sent immediately, validated
+and applied on the other board, printed on both serial consoles, and shown on
+both preview pages.
+
+Each move carries a hash of the complete resulting position, including side to
+move, castling rights, en passant availability, and move number. The receiving
+board acknowledges a matching hash. If the positions disagree, the board that
+made the move sends its complete position; the other board adopts it, both
+signal the error pattern, and the consoles record the mismatch.
+
+Pressing `*` while linked resets both boards and randomly assigns colours
+again. Holding `B` for three seconds while linked deliberately disconnects and
+returns that board to normal single-board play. An unexpected link loss keeps
+the assigned colour and temporarily refuses moves while reconnection is tried,
+rather than allowing the two games to drift.
+
+The BLE link is intentionally unencrypted and unauthenticated. Both boards
+must run the same protocol version. If several pairs enter pairing mode in the
+same room at once, boards can cross-pair; stagger pairing attempts and verify
+the peer reported on each serial console.
+
 ## Board preview
 
 At startup, the ESP32 creates an open Wi-Fi network:
@@ -108,7 +146,9 @@ access control must be handled through tournament procedure or physical
 supervision.
 
 If Wi-Fi or the HTTP server fails to start, the error is printed to the serial
-console and keypad play continues.
+console and keypad and Bluetooth play continue. The ESP32 shares its 2.4 GHz
+radio between the Wi-Fi preview and BLE using ESP-IDF coexistence; the preview
+remains available during a linked game.
 
 ## Chess behavior and limitations
 
@@ -145,6 +185,13 @@ idf.py set-target esp32
 idf.py build
 ```
 
+The tracked `sdkconfig.defaults` enables NimBLE in BLE-only controller mode,
+both central and peripheral roles, a single connection, and Wi-Fi/Bluetooth
+coexistence. A clean configuration therefore includes Bluetooth without
+manual `menuconfig` changes. `partitions.csv` provides a 1.5 MiB factory
+partition because the combined Wi-Fi and NimBLE image exceeds the default
+1 MiB app partition.
+
 Flash the ESP32 and open its serial monitor, replacing the port when needed:
 
 ```sh
@@ -171,6 +218,7 @@ src/
 ├── main.hpp
 ├── game_logic/           Board state, rules, SAN, and move entry
 │   └── pieces/           One allocation-free movement class per piece kind
+├── link/                 Portable link protocol/session and NimBLE transport
 ├── peripherals/          Keypad, LED, and queued serial output
 └── server/               Wi-Fi AP, board snapshot, HTTP server, and HTML page
 tests/                    Host-side unit tests

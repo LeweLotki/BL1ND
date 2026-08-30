@@ -54,11 +54,15 @@ extern "C" void app_main()
 
     if (wifi_access_point.start()) {
         board_server.start();
-        output.printf(
-            "Preview: free heap after startup: %lu bytes\n",
-            static_cast<unsigned long>(esp_get_free_heap_size())
-        );
     }
+
+    if (!game.startLink()) {
+        output.print("Link: Bluetooth failed to start; local play remains available\n");
+    }
+    output.printf(
+        "Startup: free heap after Wi-Fi and Bluetooth: %lu bytes\n",
+        static_cast<unsigned long>(esp_get_free_heap_size())
+    );
 
     xTaskCreate(
         numpad_task,

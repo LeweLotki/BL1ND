@@ -20,6 +20,7 @@ struct GameEvent {
     MoveError error;
     PositionStatus status;
     char error_description[56];
+    Move move;
 };
 
 class ChessGame {
@@ -28,7 +29,14 @@ public:
     explicit ChessGame(const ChessBoard& board);
 
     GameEvent handleKey(char key);
+    GameEvent applyRemoteMove(Square from, Square to, char promotion);
     const ChessBoard& board() const;
+    unsigned int moveNumber() const;
+    void setOwnedColor(Color color);
+    void setLinkAvailable(bool available);
+    void clearOwnedColor();
+    void adoptPosition(const ChessBoard& board, unsigned int move_number);
+    void resetGame();
 
     static bool formatOutput(
         const GameEvent& event,
@@ -48,4 +56,7 @@ private:
     bool promotion_pending_;
     Move pending_move_;
     PositionStatus game_result_;
+    bool has_owned_color_;
+    Color owned_color_;
+    bool link_available_;
 };

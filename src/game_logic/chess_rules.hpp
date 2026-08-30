@@ -18,6 +18,8 @@ enum class MoveError {
     CastlingThroughCheck,
     EnPassantUnavailable,
     GameOver,
+    NotYourSide,
+    NotLinked,
 };
 
 enum class PositionStatus {

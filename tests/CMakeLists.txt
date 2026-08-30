@@ -19,6 +19,8 @@ add_executable(
     ../src/game_logic/pieces/rook.cpp
     ../src/game_logic/pieces/queen.cpp
     ../src/game_logic/pieces/king.cpp
+    ../src/link/link_protocol.cpp
+    ../src/link/link_session.cpp
 )
 
 target_include_directories(
@@ -26,6 +28,7 @@ target_include_directories(
     PRIVATE
         ../src/game_logic
         ../src/game_logic/pieces
+        ../src/link
         ../src/peripherals
         ../src/server
 )

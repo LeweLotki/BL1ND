@@ -3,6 +3,8 @@
 #include "chess_notation.hpp"
 #include "chess_rules.hpp"
 #include "keypad_layout.hpp"
+#include "link_protocol.hpp"
+#include "link_session.hpp"
 #include "piece.hpp"
 
 #include <algorithm>
@@ -10,6 +12,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -62,6 +65,8 @@ GameEvent enter(ChessGame& game, const char* keys)
     }
     return event;
 }
+
+GameEvent advanceToWhitePromotion(ChessGame& game);
 
 Move legalMove(
     const ChessBoard& board,
@@ -155,6 +160,973 @@ void testKeypadAndInitialPosition()
     CHECK(board.sideToMove() == Color::White);
     CHECK(board.hasCastlingRight(Color::White, MoveKind::CastleKingside));
     CHECK(!isOnBoard(board.enPassantTarget()));
+}
+
+void testKeypadHoldTracking()
+{
+    KeypadLayout::InputTracker input;
+    CHECK(input.update('1') == '1');
+    CHECK(input.update('1') == KeypadLayout::NO_KEY);
+    CHECK(input.update(KeypadLayout::NO_KEY) == KeypadLayout::NO_KEY);
+
+    CHECK(input.update('B') == KeypadLayout::NO_KEY);
+    for (unsigned int scan = 1; scan < 20; ++scan) {
+        CHECK(input.update('B') == KeypadLayout::NO_KEY);
+    }
+    CHECK(input.update(KeypadLayout::NO_KEY) == 'B');
+
+    CHECK(input.update('B') == KeypadLayout::NO_KEY);
+    for (unsigned int scan = 1; scan < KeypadLayout::HOLD_SCANS - 1; ++scan) {
+        CHECK(input.update('B') == KeypadLayout::NO_KEY);
+    }
+    CHECK(input.update('B') == KeypadLayout::HOLD_B);
+    for (unsigned int scan = 0; scan < 400; ++scan) {
+        CHECK(input.update('B') == KeypadLayout::NO_KEY);
+    }
+    CHECK(input.update(KeypadLayout::NO_KEY) == KeypadLayout::NO_KEY);
+
+    for (unsigned int attempt = 0; attempt < 2; ++attempt) {
+        CHECK(input.update('B') == KeypadLayout::NO_KEY);
+        for (unsigned int scan = 1; scan < 100; ++scan) {
+            CHECK(input.update('B') == KeypadLayout::NO_KEY);
+        }
+        CHECK(input.update(KeypadLayout::NO_KEY) == 'B');
+    }
+    CHECK(input.update('A') == 'A');
+    CHECK(input.update('A') == KeypadLayout::NO_KEY);
+}
+
+void testPositionEncodingAndHash()
+{
+    ChessBoard starting;
+    uint8_t encoded[LinkProtocol::POSITION_SIZE];
+    LinkProtocol::encodePosition(starting, 1, encoded);
+    constexpr uint8_t EXPECTED[LinkProtocol::POSITION_SIZE] = {
+        0x24, 0x53, 0x36, 0x42,
+        0x11, 0x11, 0x11, 0x11,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x77, 0x77, 0x77, 0x77,
+        0x8a, 0xb9, 0x9c, 0xa8,
+        0x1e, 0x0f, 0x01, 0x00,
+    };
+    CHECK(std::memcmp(encoded, EXPECTED, sizeof(EXPECTED)) == 0);
+
+    ChessBoard decoded;
+    unsigned int decoded_move_number = 0;
+    CHECK(LinkProtocol::decodePosition(
+        encoded,
+        decoded,
+        decoded_move_number
+    ));
+    CHECK(decoded_move_number == 1);
+    uint8_t reencoded[LinkProtocol::POSITION_SIZE];
+    LinkProtocol::encodePosition(decoded, decoded_move_number, reencoded);
+    CHECK(std::memcmp(encoded, reencoded, sizeof(encoded)) == 0);
+
+    ChessGame kingside;
+    CHECK(enter(kingside, "7163").type == GameEventType::MoveAccepted);
+    CHECK(enter(kingside, "7866").type == GameEventType::MoveAccepted);
+    CHECK(enter(kingside, "6371").type == GameEventType::MoveAccepted);
+    CHECK(enter(kingside, "6678").type == GameEventType::MoveAccepted);
+
+    ChessGame queenside;
+    CHECK(enter(queenside, "2133").type == GameEventType::MoveAccepted);
+    CHECK(enter(queenside, "2836").type == GameEventType::MoveAccepted);
+    CHECK(enter(queenside, "3321").type == GameEventType::MoveAccepted);
+    CHECK(enter(queenside, "3628").type == GameEventType::MoveAccepted);
+    uint8_t first[LinkProtocol::POSITION_SIZE];
+    uint8_t second[LinkProtocol::POSITION_SIZE];
+    LinkProtocol::encodePosition(kingside.board(), 5, first);
+    LinkProtocol::encodePosition(queenside.board(), 5, second);
+    CHECK(std::memcmp(first, second, sizeof(first)) == 0);
+
+    const uint32_t starting_hash = LinkProtocol::hashPosition(encoded);
+    CHECK(starting_hash == LinkProtocol::hashBoard(starting, 1));
+    LinkProtocol::encodePosition(starting, 2, reencoded);
+    CHECK(LinkProtocol::hashPosition(reencoded) != starting_hash);
+
+    ChessBoard no_white_castle = position(
+        "RNBQKBNR", "PPPPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, false, false, true, true
+    );
+    CHECK(LinkProtocol::hashBoard(no_white_castle, 1) != starting_hash);
+    ChessBoard black_to_move = position(
+        "RNBQKBNR", "PPPPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::Black, true, true, true, true
+    );
+    CHECK(LinkProtocol::hashBoard(black_to_move, 1) != starting_hash);
+    ChessBoard en_passant = position(
+        "RNBQKBNR", "PPPPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, true, true, true, true, 4
+    );
+    CHECK(LinkProtocol::hashBoard(en_passant, 1) != starting_hash);
+
+    encoded[0] = 0xff;
+    CHECK(!LinkProtocol::decodePosition(
+        encoded,
+        decoded,
+        decoded_move_number
+    ));
+}
+
+void testLinkMessageEncoding()
+{
+    uint8_t buffer[LinkProtocol::MAX_MESSAGE_SIZE] = {};
+
+    const LinkProtocol::HelloMessage hello = {
+        1, 0x12345678U, 0x0201U, 0xa1b2c3d4U,
+    };
+    constexpr uint8_t HELLO[] = {
+        1, 11, 1, 0x78, 0x56, 0x34, 0x12,
+        0x01, 0x02, 0xd4, 0xc3, 0xb2, 0xa1,
+    };
+    CHECK(LinkProtocol::encodeHello(
+        hello,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(HELLO));
+    CHECK(std::memcmp(buffer, HELLO, sizeof(HELLO)) == 0);
+    LinkProtocol::HelloMessage decoded_hello = {};
+    CHECK(LinkProtocol::decodeHello(
+        HELLO,
+        sizeof(HELLO),
+        decoded_hello
+    ));
+    CHECK(decoded_hello.token == hello.token);
+    CHECK(decoded_hello.move_number == hello.move_number);
+    CHECK(decoded_hello.position_hash == hello.position_hash);
+
+    const LinkProtocol::MoveMessage move = {
+        7, square('e', '2'), square('e', '4'), 'Q', 0x01020304U,
+    };
+    constexpr uint8_t MOVE[] = {
+        2, 8, 7, 12, 28, 'Q', 4, 3, 2, 1,
+    };
+    CHECK(LinkProtocol::encodeMove(
+        move,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(MOVE));
+    CHECK(std::memcmp(buffer, MOVE, sizeof(MOVE)) == 0);
+    LinkProtocol::MoveMessage decoded_move = {};
+    CHECK(LinkProtocol::decodeMove(MOVE, sizeof(MOVE), decoded_move));
+    CHECK(decoded_move.from == move.from);
+    CHECK(decoded_move.to == move.to);
+    CHECK(decoded_move.promotion == 'Q');
+
+    const LinkProtocol::HashMessage hash = { 7, 0x01020304U };
+    constexpr uint8_t ACK[] = { 3, 5, 7, 4, 3, 2, 1 };
+    constexpr uint8_t RESYNC[] = { 4, 5, 7, 4, 3, 2, 1 };
+    CHECK(LinkProtocol::encodeAck(
+        hash,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(ACK));
+    CHECK(std::memcmp(buffer, ACK, sizeof(ACK)) == 0);
+    LinkProtocol::HashMessage decoded_hash = {};
+    CHECK(LinkProtocol::decodeAck(ACK, sizeof(ACK), decoded_hash));
+    CHECK(decoded_hash.position_hash == hash.position_hash);
+    CHECK(LinkProtocol::encodeResyncRequest(
+        hash,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(RESYNC));
+    CHECK(std::memcmp(buffer, RESYNC, sizeof(RESYNC)) == 0);
+    CHECK(LinkProtocol::decodeResyncRequest(
+        RESYNC,
+        sizeof(RESYNC),
+        decoded_hash
+    ));
+
+    LinkProtocol::SyncMessage sync = { 9, {} };
+    for (size_t index = 0; index < LinkProtocol::POSITION_SIZE; ++index) {
+        sync.position[index] = static_cast<uint8_t>(index);
+    }
+    CHECK(LinkProtocol::encodeSync(
+        sync,
+        buffer,
+        sizeof(buffer)
+    ) == LinkProtocol::MAX_MESSAGE_SIZE);
+    CHECK(buffer[0] == 5 && buffer[1] == 37 && buffer[2] == 9);
+    LinkProtocol::SyncMessage decoded_sync = {};
+    CHECK(LinkProtocol::decodeSync(
+        buffer,
+        LinkProtocol::MAX_MESSAGE_SIZE,
+        decoded_sync
+    ));
+    CHECK(std::memcmp(
+        sync.position,
+        decoded_sync.position,
+        LinkProtocol::POSITION_SIZE
+    ) == 0);
+
+    const LinkProtocol::ResetMessage reset = { 0x44332211U };
+    constexpr uint8_t RESET[] = { 6, 4, 0x11, 0x22, 0x33, 0x44 };
+    constexpr uint8_t RESET_ACK[] = { 7, 4, 0x11, 0x22, 0x33, 0x44 };
+    CHECK(LinkProtocol::encodeReset(
+        reset,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(RESET));
+    CHECK(std::memcmp(buffer, RESET, sizeof(RESET)) == 0);
+    LinkProtocol::ResetMessage decoded_reset = {};
+    CHECK(LinkProtocol::decodeReset(
+        RESET,
+        sizeof(RESET),
+        decoded_reset
+    ));
+    CHECK(decoded_reset.token == reset.token);
+    CHECK(LinkProtocol::encodeResetAck(
+        reset,
+        buffer,
+        sizeof(buffer)
+    ) == sizeof(RESET_ACK));
+    CHECK(std::memcmp(buffer, RESET_ACK, sizeof(RESET_ACK)) == 0);
+    CHECK(LinkProtocol::decodeResetAck(
+        RESET_ACK,
+        sizeof(RESET_ACK),
+        decoded_reset
+    ));
+
+    LinkProtocol::MessageType type = LinkProtocol::MessageType::Hello;
+    CHECK(LinkProtocol::inspect(
+        HELLO,
+        sizeof(HELLO),
+        type
+    ) == LinkProtocol::ParseResult::Ok);
+    CHECK(type == LinkProtocol::MessageType::Hello);
+    const uint8_t unknown[] = { 99, 2, 1, 2 };
+    CHECK(LinkProtocol::inspect(
+        unknown,
+        sizeof(unknown),
+        type
+    ) == LinkProtocol::ParseResult::UnknownType);
+    CHECK(LinkProtocol::inspect(
+        HELLO,
+        sizeof(HELLO) - 1,
+        type
+    ) == LinkProtocol::ParseResult::Invalid);
+    uint8_t wrong_length[sizeof(HELLO)];
+    std::memcpy(wrong_length, HELLO, sizeof(HELLO));
+    wrong_length[1] = 10;
+    CHECK(!LinkProtocol::decodeHello(
+        wrong_length,
+        sizeof(wrong_length),
+        decoded_hello
+    ));
+    CHECK(LinkProtocol::encodeHello(hello, buffer, 4) == 0);
+    CHECK(!LinkProtocol::decodeMove(HELLO, sizeof(HELLO), decoded_move));
+}
+
+struct TokenSource {
+    std::vector<uint32_t> values;
+    size_t index;
+};
+
+uint32_t nextToken(void* context)
+{
+    TokenSource& source = *static_cast<TokenSource*>(context);
+    if (source.index < source.values.size()) {
+        return source.values[source.index++];
+    }
+    return static_cast<uint32_t>(1000 + source.index++);
+}
+
+class SessionPair {
+public:
+    SessionPair()
+        : first_tokens_ { { 10, 30, 50, 70 }, 0 }
+        , second_tokens_ { { 20, 40, 60, 80 }, 0 }
+        , first_(first_game_, nextToken, &first_tokens_)
+        , second_(second_game_, nextToken, &second_tokens_)
+        , now_(0)
+        , drop_first_to_second_(false)
+        , drop_second_to_first_(false)
+        , duplicate_first_to_second_(false)
+        , duplicate_second_to_first_(false)
+        , delay_first_to_second_(false)
+        , delay_second_to_first_(false)
+    {
+    }
+
+    void connect()
+    {
+        first_.onEvent(LinkSession::holdEvent(), now_);
+        second_.onEvent(LinkSession::holdEvent(), now_);
+        drain();
+        const bool tied = first_.token() == second_.token();
+        first_.onEvent(
+            LinkSession::discoveredEvent(second_.token()),
+            now_
+        );
+        second_.onEvent(
+            LinkSession::discoveredEvent(first_.token()),
+            now_
+        );
+        if (tied) {
+            drain();
+            first_.onEvent(
+                LinkSession::discoveredEvent(second_.token()),
+                now_
+            );
+            second_.onEvent(
+                LinkSession::discoveredEvent(first_.token()),
+                now_
+            );
+        }
+        const bool first_initiates = first_.token() > second_.token();
+        first_.onEvent(
+            LinkSession::connectedEvent(first_initiates),
+            now_
+        );
+        second_.onEvent(
+            LinkSession::connectedEvent(!first_initiates),
+            now_
+        );
+        drain();
+        CHECK(first_.state() == LinkState::Ready);
+        CHECK(second_.state() == LinkState::Ready);
+    }
+
+    void drain()
+    {
+        for (unsigned int pass = 0; pass < 100; ++pass) {
+            bool progressed = false;
+            LinkOutput output = {};
+            while (first_.nextOutput(output)) {
+                progressed = true;
+                observed_.push_back(output.type);
+                if (output.type == LinkOutputType::SendMessage) {
+                    if (drop_first_to_second_) {
+                        drop_first_to_second_ = false;
+                    }
+                    else if (delay_first_to_second_) {
+                        delayed_first_to_second_.push_back(output);
+                    }
+                    else {
+                        second_.onEvent(
+                            LinkSession::messageEvent(
+                                output.data,
+                                output.size
+                            ),
+                            now_
+                        );
+                        if (duplicate_first_to_second_) {
+                            second_.onEvent(
+                                LinkSession::messageEvent(
+                                    output.data,
+                                    output.size
+                                ),
+                                now_
+                            );
+                            duplicate_first_to_second_ = false;
+                        }
+                    }
+                }
+                else if (output.type == LinkOutputType::Disconnect) {
+                    second_.onEvent(LinkSession::disconnectedEvent(), now_);
+                }
+            }
+            while (second_.nextOutput(output)) {
+                progressed = true;
+                observed_.push_back(output.type);
+                if (output.type == LinkOutputType::SendMessage) {
+                    if (drop_second_to_first_) {
+                        drop_second_to_first_ = false;
+                    }
+                    else if (delay_second_to_first_) {
+                        delayed_second_to_first_.push_back(output);
+                    }
+                    else {
+                        first_.onEvent(
+                            LinkSession::messageEvent(
+                                output.data,
+                                output.size
+                            ),
+                            now_
+                        );
+                        if (duplicate_second_to_first_) {
+                            first_.onEvent(
+                                LinkSession::messageEvent(
+                                    output.data,
+                                    output.size
+                                ),
+                                now_
+                            );
+                            duplicate_second_to_first_ = false;
+                        }
+                    }
+                }
+                else if (output.type == LinkOutputType::Disconnect) {
+                    first_.onEvent(LinkSession::disconnectedEvent(), now_);
+                }
+            }
+            if (!progressed) {
+                return;
+            }
+        }
+        CHECK(false);
+    }
+
+    void advance(uint32_t milliseconds)
+    {
+        now_ += milliseconds;
+        first_.onEvent(LinkSession::tickEvent(), now_);
+        second_.onEvent(LinkSession::tickEvent(), now_);
+        drain();
+    }
+
+    void disconnectAndReconnect()
+    {
+        first_.onEvent(LinkSession::disconnectedEvent(), now_);
+        second_.onEvent(LinkSession::disconnectedEvent(), now_);
+        drain();
+        first_.onEvent(
+            LinkSession::connectedEvent(first_.isInitiator()),
+            now_
+        );
+        second_.onEvent(
+            LinkSession::connectedEvent(second_.isInitiator()),
+            now_
+        );
+        drain();
+    }
+
+    ChessGame& whiteGame()
+    {
+        return first_.myColor() == Color::White
+            ? first_game_
+            : second_game_;
+    }
+
+    ChessGame& blackGame()
+    {
+        return first_.myColor() == Color::Black
+            ? first_game_
+            : second_game_;
+    }
+
+    LinkSession& whiteSession()
+    {
+        return first_.myColor() == Color::White ? first_ : second_;
+    }
+
+    LinkSession& blackSession()
+    {
+        return first_.myColor() == Color::Black ? first_ : second_;
+    }
+
+    void dropWhiteToBlack()
+    {
+        if (&whiteSession() == &first_) {
+            drop_first_to_second_ = true;
+        }
+        else {
+            drop_second_to_first_ = true;
+        }
+    }
+
+    void dropBlackToWhite()
+    {
+        if (&blackSession() == &first_) {
+            drop_first_to_second_ = true;
+        }
+        else {
+            drop_second_to_first_ = true;
+        }
+    }
+
+    void duplicateWhiteToBlack()
+    {
+        if (&whiteSession() == &first_) {
+            duplicate_first_to_second_ = true;
+        }
+        else {
+            duplicate_second_to_first_ = true;
+        }
+    }
+
+    void delayWhiteToBlack()
+    {
+        if (&whiteSession() == &first_) {
+            delay_first_to_second_ = true;
+        }
+        else {
+            delay_second_to_first_ = true;
+        }
+    }
+
+    void releaseDelayed()
+    {
+        delay_first_to_second_ = false;
+        delay_second_to_first_ = false;
+        for (const LinkOutput& output : delayed_first_to_second_) {
+            second_.onEvent(
+                LinkSession::messageEvent(output.data, output.size),
+                now_
+            );
+        }
+        for (const LinkOutput& output : delayed_second_to_first_) {
+            first_.onEvent(
+                LinkSession::messageEvent(output.data, output.size),
+                now_
+            );
+        }
+        delayed_first_to_second_.clear();
+        delayed_second_to_first_.clear();
+        drain();
+    }
+
+    bool observed(LinkOutputType type) const
+    {
+        return std::find(observed_.begin(), observed_.end(), type)
+            != observed_.end();
+    }
+
+    void clearObserved()
+    {
+        observed_.clear();
+    }
+
+    ChessGame first_game_;
+    ChessGame second_game_;
+    TokenSource first_tokens_;
+    TokenSource second_tokens_;
+    LinkSession first_;
+    LinkSession second_;
+    uint32_t now_;
+    bool drop_first_to_second_;
+    bool drop_second_to_first_;
+    bool duplicate_first_to_second_;
+    bool duplicate_second_to_first_;
+    bool delay_first_to_second_;
+    bool delay_second_to_first_;
+    std::vector<LinkOutput> delayed_first_to_second_;
+    std::vector<LinkOutput> delayed_second_to_first_;
+    std::vector<LinkOutputType> observed_;
+};
+
+void checkPairBoardsEqual(const SessionPair& pair)
+{
+    uint8_t first[LinkProtocol::POSITION_SIZE];
+    uint8_t second[LinkProtocol::POSITION_SIZE];
+    LinkProtocol::encodePosition(
+        pair.first_game_.board(),
+        pair.first_game_.moveNumber(),
+        first
+    );
+    LinkProtocol::encodePosition(
+        pair.second_game_.board(),
+        pair.second_game_.moveNumber(),
+        second
+    );
+    CHECK(std::memcmp(first, second, sizeof(first)) == 0);
+}
+
+GameEvent playLinked(SessionPair& pair, const char* keys)
+{
+    ChessGame& game = pair.first_game_.board().sideToMove() == Color::White
+        ? pair.whiteGame()
+        : pair.blackGame();
+    const GameEvent event = enter(game, keys);
+    if (event.type == GameEventType::MoveAccepted) {
+        LinkSession& session = game.board().sideToMove() == Color::Black
+            ? pair.whiteSession()
+            : pair.blackSession();
+        session.onEvent(LinkSession::localMoveEvent(event.move), pair.now_);
+        pair.drain();
+        checkPairBoardsEqual(pair);
+    }
+    return event;
+}
+
+void testLinkSessionPairingAndPlay()
+{
+    SessionPair pair;
+    pair.connect();
+    CHECK(pair.first_.hasColor());
+    CHECK(pair.second_.hasColor());
+    CHECK(pair.first_.myColor() != pair.second_.myColor());
+    CHECK(pair.observed(LinkOutputType::Linked));
+    CHECK(pair.observed(LinkOutputType::ColorAssigned));
+
+    ChessGame& white_game = pair.whiteGame();
+    const GameEvent white_move = enter(white_game, "5254");
+    CHECK(white_move.type == GameEventType::MoveAccepted);
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(white_move.move),
+        pair.now_
+    );
+    pair.drain();
+    checkPairBoardsEqual(pair);
+    CHECK(pair.whiteSession().state() == LinkState::Ready);
+    CHECK(pair.observed(LinkOutputType::RemoteMoveApplied));
+
+    const GameEvent black_move = enter(pair.blackGame(), "5755");
+    CHECK(black_move.type == GameEventType::MoveAccepted);
+    pair.blackSession().onEvent(
+        LinkSession::localMoveEvent(black_move.move),
+        pair.now_
+    );
+    pair.drain();
+    checkPairBoardsEqual(pair);
+
+    const GameEvent wrong_side = enter(pair.blackGame(), "7163");
+    CHECK(wrong_side.type == GameEventType::MoveRejected);
+    CHECK(wrong_side.error == MoveError::NotYourSide);
+    CHECK(std::strcmp(
+        wrong_side.error_description,
+        "it is your opponent's turn"
+    ) == 0);
+}
+
+void testLinkHarnessControlsAndEqualTokens()
+{
+    SessionPair pair;
+    pair.first_tokens_.values = { 42, 10, 30 };
+    pair.second_tokens_.values = { 42, 20, 40 };
+    pair.connect();
+    CHECK(pair.first_.token() != pair.second_.token());
+
+    pair.duplicateWhiteToBlack();
+    const GameEvent duplicated = enter(pair.whiteGame(), "5254");
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(duplicated.move),
+        pair.now_
+    );
+    pair.drain();
+    checkPairBoardsEqual(pair);
+    CHECK(pair.first_game_.moveNumber() == 2);
+    CHECK(pair.second_game_.moveNumber() == 2);
+
+    SessionPair delayed;
+    delayed.connect();
+    delayed.delayWhiteToBlack();
+    const GameEvent held = enter(delayed.whiteGame(), "5254");
+    delayed.whiteSession().onEvent(
+        LinkSession::localMoveEvent(held.move),
+        delayed.now_
+    );
+    delayed.drain();
+    CHECK(delayed.whiteSession().state() == LinkState::AwaitingAck);
+    CHECK(delayed.blackGame().moveNumber() == 1);
+    delayed.releaseDelayed();
+    CHECK(delayed.whiteSession().state() == LinkState::Ready);
+    checkPairBoardsEqual(delayed);
+}
+
+void testLinkedShortGame()
+{
+    SessionPair pair;
+    pair.connect();
+    constexpr const char* MOVES[] = {
+        "5254", "5755", "7163", "2836", "6125", "1716",
+    };
+    for (const char* move : MOVES) {
+        CHECK(playLinked(pair, move).type == GameEventType::MoveAccepted);
+        checkPairBoardsEqual(pair);
+    }
+    CHECK(pair.first_game_.moveNumber() == 7);
+    CHECK(pair.second_game_.moveNumber() == 7);
+}
+
+void testLinkSessionTimeoutAndDuplicate()
+{
+    SessionPair pair;
+    pair.connect();
+    const GameEvent move = enter(pair.whiteGame(), "5254");
+    pair.dropBlackToWhite();
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(move.move),
+        pair.now_
+    );
+    pair.drain();
+    CHECK(pair.whiteSession().state() == LinkState::AwaitingAck);
+    pair.advance(2001);
+    CHECK(pair.whiteSession().state() == LinkState::Ready);
+    checkPairBoardsEqual(pair);
+}
+
+void testLinkSessionMismatchAndResync()
+{
+    SessionPair pair;
+    pair.connect();
+    ChessBoard corrupted = position(
+        "RNBQKBNR", " PPPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, true, true, true, true
+    );
+    pair.blackGame().adoptPosition(corrupted, 1);
+    const GameEvent move = enter(pair.whiteGame(), "5254");
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(move.move),
+        pair.now_
+    );
+    pair.drain();
+    CHECK(pair.observed(LinkOutputType::PositionMismatch));
+    CHECK(pair.observed(LinkOutputType::PositionCorrected));
+    checkPairBoardsEqual(pair);
+}
+
+void testLinkSessionIllegalReceiverAndEntryReset()
+{
+    SessionPair pair;
+    pair.connect();
+    CHECK(pair.blackGame().handleKey('5').type == GameEventType::None);
+    CHECK(pair.blackGame().handleKey('2').type == GameEventType::None);
+    ChessBoard corrupted = position(
+        "RNBQKBNR", "PPPP PPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, true, true, true, true
+    );
+    pair.blackGame().adoptPosition(corrupted, 1);
+    CHECK(pair.blackGame().handleKey('5').type == GameEventType::None);
+    CHECK(pair.blackGame().handleKey('2').type == GameEventType::None);
+
+    const GameEvent move = enter(pair.whiteGame(), "5254");
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(move.move),
+        pair.now_
+    );
+    pair.drain();
+    CHECK(pair.observed(LinkOutputType::PositionMismatch));
+    checkPairBoardsEqual(pair);
+
+    const GameEvent black_move = enter(pair.blackGame(), "5755");
+    CHECK(black_move.type == GameEventType::MoveAccepted);
+    pair.blackSession().onEvent(
+        LinkSession::localMoveEvent(black_move.move),
+        pair.now_
+    );
+    pair.drain();
+    checkPairBoardsEqual(pair);
+
+    SessionPair promotion;
+    promotion.connect();
+    promotion.blackGame().clearOwnedColor();
+    CHECK(advanceToWhitePromotion(promotion.blackGame()).type
+        == GameEventType::PromotionPending);
+    LinkProtocol::SyncMessage sync = { 0, {} };
+    ChessBoard starting;
+    LinkProtocol::encodePosition(starting, 1, sync.position);
+    uint8_t wire[LinkProtocol::MAX_MESSAGE_SIZE];
+    const size_t size = LinkProtocol::encodeSync(sync, wire, sizeof(wire));
+    promotion.blackSession().onEvent(
+        LinkSession::messageEvent(wire, size),
+        promotion.now_
+    );
+    CHECK(enter(promotion.blackGame(), "5254").type
+        == GameEventType::MoveAccepted);
+}
+
+void testLinkSessionBrokenAfterFailedResync()
+{
+    SessionPair pair;
+    pair.connect();
+    const GameEvent move = enter(pair.whiteGame(), "5254");
+    pair.dropBlackToWhite();
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(move.move),
+        pair.now_
+    );
+    pair.drain();
+    for (unsigned int timeout = 0; timeout < 5; ++timeout) {
+        pair.dropBlackToWhite();
+        pair.advance(2001);
+    }
+    CHECK(pair.whiteSession().state() == LinkState::Broken);
+    CHECK(pair.blackSession().state() == LinkState::LinkLost);
+    CHECK(pair.observed(LinkOutputType::Broken));
+    CHECK(enter(pair.blackGame(), "5755").error == MoveError::NotLinked);
+}
+
+void testLinkSessionReconnectAndReset()
+{
+    SessionPair pair;
+    pair.connect();
+    const GameEvent move = enter(pair.whiteGame(), "5254");
+    pair.dropWhiteToBlack();
+    pair.whiteSession().onEvent(
+        LinkSession::localMoveEvent(move.move),
+        pair.now_
+    );
+    pair.drain();
+    CHECK(pair.whiteSession().state() == LinkState::AwaitingAck);
+    pair.disconnectAndReconnect();
+    CHECK(pair.first_.state() == LinkState::Ready);
+    CHECK(pair.second_.state() == LinkState::Ready);
+    CHECK(pair.observed(LinkOutputType::Reconciled));
+    checkPairBoardsEqual(pair);
+
+    const Color old_first_color = pair.first_.myColor();
+    pair.whiteGame().resetGame();
+    pair.whiteSession().onEvent(
+        LinkSession::localResetEvent(),
+        pair.now_
+    );
+    pair.drain();
+    checkPairBoardsEqual(pair);
+    CHECK(pair.first_game_.moveNumber() == 1);
+    CHECK(pair.second_game_.moveNumber() == 1);
+    CHECK(pair.first_.myColor() != pair.second_.myColor());
+    CHECK(pair.observed(LinkOutputType::ResetApplied));
+    CHECK(
+        pair.first_.myColor() != old_first_color
+        || pair.first_.token() != 10
+    );
+}
+
+void testLinkSessionReconnectionChoices()
+{
+    SessionPair unchanged;
+    unchanged.connect();
+    unchanged.clearObserved();
+    unchanged.disconnectAndReconnect();
+    CHECK(unchanged.observed(LinkOutputType::Reconciled));
+    CHECK(!unchanged.observed(LinkOutputType::PositionCorrected));
+    checkPairBoardsEqual(unchanged);
+
+    SessionPair tied;
+    tied.connect();
+    ChessBoard first_position = position(
+        "RNBQKBNR", " PPPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, true, true, true, true
+    );
+    ChessBoard second_position = position(
+        "RNBQKBNR", "P PPPPPP", "        ", "        ",
+        "        ", "        ", "pppppppp", "rnbqkbnr",
+        Color::White, true, true, true, true
+    );
+    tied.first_game_.adoptPosition(first_position, 1);
+    tied.second_game_.adoptPosition(second_position, 1);
+    const uint32_t authoritative = tied.first_.isInitiator()
+        ? LinkProtocol::hashBoard(tied.first_game_.board(), 1)
+        : LinkProtocol::hashBoard(tied.second_game_.board(), 1);
+    tied.clearObserved();
+    tied.disconnectAndReconnect();
+    CHECK(LinkProtocol::hashBoard(tied.first_game_.board(), 1)
+        == authoritative);
+    CHECK(LinkProtocol::hashBoard(tied.second_game_.board(), 1)
+        == authoritative);
+    CHECK(tied.observed(LinkOutputType::PositionCorrected));
+}
+
+void testLinkedResetFromBothSidesAndColorVariation()
+{
+    SessionPair pair;
+    pair.first_tokens_.values = { 10, 11, 12, 13 };
+    pair.second_tokens_.values = { 30, 20, 20, 21 };
+    pair.connect();
+    bool saw_white = pair.first_.myColor() == Color::White;
+    bool saw_black = pair.first_.myColor() == Color::Black;
+
+    pair.first_game_.resetGame();
+    pair.first_.onEvent(LinkSession::localResetEvent(), pair.now_);
+    pair.drain();
+    saw_white = saw_white || pair.first_.myColor() == Color::White;
+    saw_black = saw_black || pair.first_.myColor() == Color::Black;
+    checkPairBoardsEqual(pair);
+
+    pair.second_game_.resetGame();
+    pair.second_.onEvent(LinkSession::localResetEvent(), pair.now_);
+    pair.drain();
+    saw_white = saw_white || pair.first_.myColor() == Color::White;
+    saw_black = saw_black || pair.first_.myColor() == Color::Black;
+    checkPairBoardsEqual(pair);
+    CHECK(pair.first_game_.moveNumber() == 1);
+    CHECK(pair.second_game_.moveNumber() == 1);
+    CHECK(saw_white && saw_black);
+}
+
+void testLinkSessionPairingExpiryAndEqualTokens()
+{
+    ChessGame game;
+    TokenSource tokens = { { 42, 99 }, 0 };
+    LinkSession session(game, nextToken, &tokens);
+    session.onEvent(LinkSession::holdEvent(), 0);
+    CHECK(session.state() == LinkState::Pairing);
+    session.onEvent(LinkSession::discoveredEvent(42), 1);
+    CHECK(session.token() == 99);
+    CHECK(session.state() == LinkState::Pairing);
+    session.onEvent(LinkSession::tickEvent(), 30001);
+    CHECK(session.state() == LinkState::Unlinked);
+    LinkOutput output = {};
+    bool failed = false;
+    while (session.nextOutput(output)) {
+        failed = failed || output.type == LinkOutputType::PairingFailed;
+    }
+    CHECK(failed);
+    CHECK(game.moveNumber() == 1);
+}
+
+void testLinkedPromotionAndMate()
+{
+    SessionPair promotion;
+    promotion.connect();
+    CHECK(playLinked(promotion, "1214").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "8786").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "1415").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "8685").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "1516").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "8584").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "1627").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(promotion, "8483").type == GameEventType::MoveAccepted);
+    ChessGame& white = promotion.whiteGame();
+    CHECK(enter(white, "2718").type == GameEventType::PromotionPending);
+    const GameEvent promoted = white.handleKey('D');
+    CHECK(promoted.type == GameEventType::MoveAccepted);
+    promotion.whiteSession().onEvent(
+        LinkSession::localMoveEvent(promoted.move),
+        promotion.now_
+    );
+    promotion.drain();
+    checkPairBoardsEqual(promotion);
+    CHECK(promotion.blackGame().board().pieceAt(square('a', '8')) == 'N');
+
+    SessionPair mate;
+    mate.connect();
+    CHECK(playLinked(mate, "6263").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(mate, "5755").type == GameEventType::MoveAccepted);
+    CHECK(playLinked(mate, "7274").type == GameEventType::MoveAccepted);
+    const GameEvent checkmate = playLinked(mate, "4884");
+    CHECK(checkmate.status == PositionStatus::Checkmate);
+    CHECK(enter(mate.whiteGame(), "5254").error == MoveError::GameOver);
+    CHECK(enter(mate.blackGame(), "5254").error == MoveError::GameOver);
+}
+
+void testChessGameOwnershipAndRemoteMove()
+{
+    ChessGame game;
+    game.setOwnedColor(Color::Black);
+    GameEvent event = enter(game, "5254");
+    CHECK(event.error == MoveError::NotYourSide);
+    CHECK(game.moveNumber() == 1);
+    game.clearOwnedColor();
+    event = enter(game, "5254");
+    CHECK(event.type == GameEventType::MoveAccepted);
+    CHECK(game.moveNumber() == 2);
+
+    ChessGame remote;
+    event = remote.applyRemoteMove(square('e', '2'), square('e', '5'), '\0');
+    CHECK(event.type == GameEventType::MoveRejected);
+    CHECK(remote.moveNumber() == 1);
+    event = remote.applyRemoteMove(square('e', '2'), square('e', '4'), '\0');
+    CHECK(event.type == GameEventType::MoveAccepted);
+    CHECK(event.move.from == square('e', '2'));
+    CHECK(remote.moveNumber() == 2);
+
+    remote.setOwnedColor(Color::Black);
+    remote.setLinkAvailable(false);
+    event = enter(remote, "5755");
+    CHECK(event.error == MoveError::NotLinked);
+    CHECK(std::strcmp(event.error_description, "link is down") == 0);
 }
 
 void testKnightMovement()
@@ -1459,6 +2431,22 @@ int main()
         void (*run)();
     } tests[] = {
         { "keypad and initial position", testKeypadAndInitialPosition },
+        { "keypad hold tracking", testKeypadHoldTracking },
+        { "position encoding and hash", testPositionEncodingAndHash },
+        { "link message encoding", testLinkMessageEncoding },
+        { "link pairing and play", testLinkSessionPairingAndPlay },
+        { "link harness controls", testLinkHarnessControlsAndEqualTokens },
+        { "linked short game", testLinkedShortGame },
+        { "link timeout and duplicate", testLinkSessionTimeoutAndDuplicate },
+        { "link mismatch and resync", testLinkSessionMismatchAndResync },
+        { "link illegal receiver", testLinkSessionIllegalReceiverAndEntryReset },
+        { "link failed resync", testLinkSessionBrokenAfterFailedResync },
+        { "link reconnect and reset", testLinkSessionReconnectAndReset },
+        { "link reconnection choices", testLinkSessionReconnectionChoices },
+        { "linked reset and colors", testLinkedResetFromBothSidesAndColorVariation },
+        { "link pairing expiry", testLinkSessionPairingExpiryAndEqualTokens },
+        { "linked promotion and mate", testLinkedPromotionAndMate },
+        { "chess ownership and remote move", testChessGameOwnershipAndRemoteMove },
         { "knight movement", testKnightMovement },
         { "slider movement", testSliderMovement },
         { "pawn and king movement", testPawnAndKingMovement },
