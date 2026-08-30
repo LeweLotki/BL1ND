@@ -1,15 +1,23 @@
+#include "board_server.hpp"
+#include "board_snapshot.hpp"
 #include "game.hpp"
 #include "led.hpp"
 #include "numpad.hpp"
 #include "standard_output.hpp"
+#include "wifi_access_point.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "esp_system.h"
+
 static StandardOutput output;
+static BoardSnapshot board_snapshot;
+static WifiAccessPoint wifi_access_point(output);
+static BoardServer board_server(board_snapshot, output);
 static NumPad numpad;
 static Led led;
-static Game game(numpad, led, output);
+static Game game(numpad, led, output, board_snapshot);
 
 static void standard_output_task(void* parameter)
 {
@@ -41,6 +49,14 @@ extern "C" void app_main()
         5,
         nullptr
     );
+
+    if (wifi_access_point.start()) {
+        board_server.start();
+        output.printf(
+            "Preview: free heap after startup: %lu bytes\n",
+            static_cast<unsigned long>(esp_get_free_heap_size())
+        );
+    }
 
     xTaskCreate(
         numpad_task,

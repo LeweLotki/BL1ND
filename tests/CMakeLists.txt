@@ -7,6 +7,7 @@ enable_testing()
 add_executable(
     chess_tests
     test_chess.cpp
+    ../main/board_page.cpp
     ../main/chess_board.cpp
     ../main/chess_game.cpp
 )

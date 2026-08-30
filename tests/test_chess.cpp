@@ -1,9 +1,12 @@
+#include "board_page.hpp"
 #include "chess_game.hpp"
 #include "keypad_layout.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace {
 
@@ -32,6 +35,26 @@ GameEvent enter(ChessGame& game, const char* keys)
         event = game.handleKey(*key);
     }
     return event;
+}
+
+void copyBoard(const ChessBoard& board, char cells[64])
+{
+    for (uint8_t rank = 0; rank < 8; ++rank) {
+        for (uint8_t file = 0; file < 8; ++file) {
+            cells[rank * 8 + file] = board.pieceAt({ file, rank });
+        }
+    }
+}
+
+size_t countText(const std::string& text, const std::string& needle)
+{
+    size_t count = 0;
+    size_t position = 0;
+    while ((position = text.find(needle, position)) != std::string::npos) {
+        ++count;
+        position += needle.size();
+    }
+    return count;
 }
 
 void expectEvent(
@@ -293,6 +316,86 @@ void testLegalityIsNotChecked()
     );
 }
 
+void testBoardPageStartingPosition()
+{
+    ChessGame game;
+    char cells[64];
+    copyBoard(game.board(), cells);
+
+    char output[4096];
+    const size_t output_size = renderBoardPage(
+        cells,
+        output,
+        sizeof(output)
+    );
+    CHECK(output_size > 0);
+    CHECK(output_size < 3800);
+    CHECK(output[output_size] == '\0');
+
+    const std::string page(output, output_size);
+    CHECK(page.find("<!DOCTYPE html>") == 0);
+    CHECK(page.find("http-equiv=\"refresh\" content=\"2\"") != std::string::npos);
+    CHECK(page.find(".w{color:#fff") != std::string::npos);
+    CHECK(page.find(".b{color:#000") != std::string::npos);
+    CHECK(countText(page, "<td class=") == 64);
+
+    CHECK(
+        page.find(
+            "id=e1><b class=w>K</b>"
+        ) != std::string::npos
+    );
+    CHECK(
+        page.find(
+            "id=d1><b class=w>Q</b>"
+        ) != std::string::npos
+    );
+    CHECK(
+        page.find(
+            "id=g8><b class=b>N</b>"
+        ) != std::string::npos
+    );
+    CHECK(
+        page.find(
+            "id=e7><b class=b>P</b>"
+        ) != std::string::npos
+    );
+}
+
+void testBoardPageEmptyAndMovedPosition()
+{
+    char cells[64];
+    std::fill(std::begin(cells), std::end(cells), ' ');
+
+    char output[4096];
+    size_t output_size = renderBoardPage(cells, output, sizeof(output));
+    CHECK(output_size > 0);
+
+    std::string page(output, output_size);
+    CHECK(countText(page, "<td class=") == 64);
+    CHECK(countText(page, "<b class=") == 0);
+
+    cells[3 * 8 + 4] = 'P';
+    output_size = renderBoardPage(cells, output, sizeof(output));
+    CHECK(output_size > 0);
+    page.assign(output, output_size);
+    CHECK(countText(page, "<b class=") == 1);
+    CHECK(
+        page.find(
+            "id=e4><b class=w>P</b>"
+        ) != std::string::npos
+    );
+}
+
+void testBoardPageRejectsSmallBuffer()
+{
+    char cells[64];
+    std::fill(std::begin(cells), std::end(cells), ' ');
+
+    char output[64];
+    CHECK(renderBoardPage(cells, output, sizeof(output)) == 0);
+    CHECK(output[0] == '\0');
+}
+
 } // namespace
 
 int main()
@@ -310,6 +413,9 @@ int main()
         { "castling", testCastlingMovesTheRook },
         { "promotion", testPromotion },
         { "legality omitted", testLegalityIsNotChecked },
+        { "board page starting position", testBoardPageStartingPosition },
+        { "board page empty and moved", testBoardPageEmptyAndMovedPosition },
+        { "board page small buffer", testBoardPageRejectsSmallBuffer },
     };
 
     for (const auto& test : tests) {
