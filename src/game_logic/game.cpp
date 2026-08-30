@@ -35,17 +35,24 @@ void Game::run()
 void Game::handleKey(char key)
 {
     const GameEvent event = chess_game_.handleKey(key);
-    char message[64];
+    char message[96];
     if (ChessGame::formatOutput(event, message, sizeof(message))) {
         output_.print(message);
     }
 
-    if (event.type == GameEventType::MoveAccepted) {
+    switch (event.type) {
+    case GameEventType::MoveAccepted:
         led_.blinkOnce();
-    }
-
-    if (event.type == GameEventType::MoveAccepted
-        || event.type == GameEventType::Reset) {
         board_snapshot_.publish(chess_game_.board());
+        break;
+    case GameEventType::MoveRejected:
+        led_.blinkError();
+        break;
+    case GameEventType::Reset:
+        board_snapshot_.publish(chess_game_.board());
+        break;
+    case GameEventType::None:
+    case GameEventType::PromotionPending:
+        break;
     }
 }

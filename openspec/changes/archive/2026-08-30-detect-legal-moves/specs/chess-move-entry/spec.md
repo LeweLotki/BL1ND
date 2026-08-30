@@ -1,27 +1,4 @@
-# chess-move-entry Specification
-
-## Purpose
-TBD - created by archiving change create-chess-task. Update Purpose after archive.
-## Requirements
-### Requirement: Every physical key is distinguishable from no key
-
-The keypad scanner SHALL report a distinct code for each of the 16 keys in the matrix, and SHALL use a sentinel value that no key can produce to report that nothing is pressed. In particular the key at row 3 / column 0 SHALL be reported with its own code.
-
-#### Scenario: Reset key is reported
-
-- **WHEN** the key at row 3, column 0 is pressed
-- **THEN** the scanner reports the reset key code
-- **AND** that code differs from the code reported when no key is pressed
-
-#### Scenario: No key pressed
-
-- **WHEN** no key in the matrix is pressed
-- **THEN** the scanner reports the "nothing pressed" sentinel
-
-#### Scenario: Every key has a unique code
-
-- **WHEN** each of the 16 keys is pressed in turn
-- **THEN** each press reports a code unique to that key
+## MODIFIED Requirements
 
 ### Requirement: A move is entered as four digits
 
@@ -133,23 +110,7 @@ The LED SHALL signal the outcome of every completed move with one of two disting
 - **WHEN** the player presses the reset key
 - **THEN** the LED does not signal
 
-### Requirement: Keypresses in a move are not dropped
-
-The path from the keypad scanner to the move-entry logic SHALL buffer keypresses in first-in-first-out order and SHALL NOT discard an earlier press because a later one arrived. All four digits of a move SHALL be delivered in the order they were pressed.
-
-#### Scenario: Rapid entry preserves order
-
-- **WHEN** the player presses four digits in quick succession
-- **THEN** all four are received in the order pressed and the intended move is processed
-
-### Requirement: Peripherals emit no key-level output
-
-The keypad SHALL NOT print a line to standard output for each keypress. Standard output SHALL carry only move results and rejection messages.
-
-#### Scenario: Pressing a digit prints nothing
-
-- **WHEN** the player presses the first digit of a move
-- **THEN** nothing is printed to standard output
+## ADDED Requirements
 
 ### Requirement: A promotion is completed by a letter key
 
@@ -189,4 +150,3 @@ While a promotion choice is awaited, the system SHALL accept `A` for a queen, `B
 
 - **WHEN** a promotion choice becomes awaited
 - **THEN** a line is printed to standard output naming the pending move and the four available choices
-

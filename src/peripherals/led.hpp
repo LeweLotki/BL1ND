@@ -7,14 +7,20 @@
 
 class Led {
 public:
+    enum class BlinkPattern : uint8_t {
+        Single,
+        Error,
+    };
+
     Led();
 
     void run();
     bool blinkOnce();
+    bool blinkError();
 
 private:
     void initGpio();
-    void blink();
+    void blink(BlinkPattern pattern);
 
     static constexpr gpio_num_t PIN_ = GPIO_NUM_2;
 

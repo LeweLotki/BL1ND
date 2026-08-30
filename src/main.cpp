@@ -81,7 +81,7 @@ extern "C" void app_main()
     xTaskCreate(
         game_task,
         "game_task",
-        2048,
+        4096,
         &game,
         5,
         nullptr

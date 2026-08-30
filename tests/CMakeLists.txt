@@ -10,12 +10,22 @@ add_executable(
     ../src/server/board_page.cpp
     ../src/game_logic/chess_board.cpp
     ../src/game_logic/chess_game.cpp
+    ../src/game_logic/chess_notation.cpp
+    ../src/game_logic/chess_rules.cpp
+    ../src/game_logic/pieces/piece.cpp
+    ../src/game_logic/pieces/pawn.cpp
+    ../src/game_logic/pieces/knight.cpp
+    ../src/game_logic/pieces/bishop.cpp
+    ../src/game_logic/pieces/rook.cpp
+    ../src/game_logic/pieces/queen.cpp
+    ../src/game_logic/pieces/king.cpp
 )
 
 target_include_directories(
     chess_tests
     PRIVATE
         ../src/game_logic
+        ../src/game_logic/pieces
         ../src/peripherals
         ../src/server
 )

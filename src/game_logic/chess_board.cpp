@@ -1,7 +1,7 @@
 #include "chess_board.hpp"
 
-#include <cctype>
-#include <cstdio>
+#include "piece.hpp"
+
 #include <cstring>
 
 ChessBoard::ChessBoard()
@@ -14,11 +14,84 @@ void ChessBoard::reset()
     for (int rank = 0; rank < 8; ++rank) {
         memcpy(board_[rank], INITIAL_POSITION[rank], 8);
     }
+    side_to_move_ = Color::White;
+    white_kingside_ = true;
+    white_queenside_ = true;
+    black_kingside_ = true;
+    black_queenside_ = true;
+    en_passant_file_ = -1;
 }
 
 char ChessBoard::pieceAt(Square square) const
 {
     return board_[square.rank][square.file];
+}
+
+Color ChessBoard::colorAt(Square square) const
+{
+    return colorOf(pieceAt(square));
+}
+
+bool ChessBoard::isEmpty(Square square) const
+{
+    return ::isEmpty(pieceAt(square));
+}
+
+Color ChessBoard::sideToMove() const
+{
+    return side_to_move_;
+}
+
+Square ChessBoard::enPassantTarget() const
+{
+    if (en_passant_file_ < 0) {
+        return { 8, 8 };
+    }
+    return {
+        static_cast<uint8_t>(en_passant_file_),
+        static_cast<uint8_t>(side_to_move_ == Color::White ? 5 : 2),
+    };
+}
+
+Square ChessBoard::kingSquare(Color color) const
+{
+    const char king = color == Color::White ? 'K' : 'k';
+    for (uint8_t rank = 0; rank < 8; ++rank) {
+        for (uint8_t file = 0; file < 8; ++file) {
+            if (board_[rank][file] == king) {
+                return { file, rank };
+            }
+        }
+    }
+    return { 8, 8 };
+}
+
+bool ChessBoard::isAttacked(Square target, Color by) const
+{
+    for (uint8_t rank = 0; rank < 8; ++rank) {
+        for (uint8_t file = 0; file < 8; ++file) {
+            const Square from = { file, rank };
+            const char value = pieceAt(from);
+            const Piece* piece = Piece::forSquare(value);
+            if (piece != nullptr && colorOf(value) == by
+                && piece->attacks(*this, from, target)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ChessBoard::hasCastlingRight(Color color, MoveKind side) const
+{
+    if (color == Color::White) {
+        return side == MoveKind::CastleKingside
+            ? white_kingside_
+            : side == MoveKind::CastleQueenside && white_queenside_;
+    }
+    return side == MoveKind::CastleKingside
+        ? black_kingside_
+        : side == MoveKind::CastleQueenside && black_queenside_;
 }
 
 uint8_t ChessBoard::digitToIndex(char digit)
@@ -33,101 +106,90 @@ void ChessBoard::formatSquare(Square square, char text[3])
     text[2] = '\0';
 }
 
-bool ChessBoard::isCastling(Square from, Square to, char piece) const
+void ChessBoard::clearCastlingRightsTouched(Square square)
 {
-    const bool white_home = piece == 'K' && from.rank == 0;
-    const bool black_home = piece == 'k' && from.rank == 7;
-
-    return (white_home || black_home)
-        && from.file == 4
-        && to.rank == from.rank
-        && (to.file == 2 || to.file == 6);
+    if (square == Square { 4, 0 }) {
+        white_kingside_ = false;
+        white_queenside_ = false;
+    }
+    if (square == Square { 0, 0 }) {
+        white_queenside_ = false;
+    }
+    if (square == Square { 7, 0 }) {
+        white_kingside_ = false;
+    }
+    if (square == Square { 4, 7 }) {
+        black_kingside_ = false;
+        black_queenside_ = false;
+    }
+    if (square == Square { 0, 7 }) {
+        black_queenside_ = false;
+    }
+    if (square == Square { 7, 7 }) {
+        black_kingside_ = false;
+    }
 }
 
-bool ChessBoard::formatMove(Square from, Square to, MoveNotation& notation) const
+void ChessBoard::apply(const Move& move)
 {
-    char from_text[3];
-    char to_text[3];
-    formatSquare(from, from_text);
-    formatSquare(to, to_text);
-    snprintf(
-        notation.coordinate,
-        sizeof(notation.coordinate),
-        "%s%s",
-        from_text,
-        to_text
-    );
+    const char moving_piece = pieceAt(move.from);
+    clearCastlingRightsTouched(move.from);
+    clearCastlingRightsTouched(move.to);
 
-    const char piece = pieceAt(from);
-    if (piece == EMPTY) {
-        return false;
-    }
-
-    if (isCastling(from, to, piece)) {
-        strcpy(notation.algebraic, to.file == 6 ? "O-O" : "O-O-O");
-        return true;
-    }
-
-    const char upper_piece = static_cast<char>(
-        std::toupper(static_cast<unsigned char>(piece))
-    );
-    const bool is_pawn = upper_piece == 'P';
-    const bool is_capture = pieceAt(to) != EMPTY
-        || (is_pawn && from.file != to.file);
-    const bool is_promotion = piece == 'P' && to.rank == 7;
-
-    if (is_pawn) {
-        if (is_capture) {
-            snprintf(
-                notation.algebraic,
-                sizeof(notation.algebraic),
-                "%cx%s%s",
-                from_text[0],
-                to_text,
-                is_promotion ? "=Q" : ""
-            );
-        }
-        else {
-            snprintf(
-                notation.algebraic,
-                sizeof(notation.algebraic),
-                "%s%s",
-                to_text,
-                is_promotion ? "=Q" : ""
-            );
-        }
-    }
-    else {
-        snprintf(
-            notation.algebraic,
-            sizeof(notation.algebraic),
-            "%c%s%s",
-            upper_piece,
-            is_capture ? "x" : "",
-            to_text
-        );
-    }
-
-    return true;
-}
-
-void ChessBoard::applyMove(Square from, Square to)
-{
-    const char piece = pieceAt(from);
-
-    if (isCastling(from, to, piece)) {
+    if (move.kind == MoveKind::CastleKingside
+        || move.kind == MoveKind::CastleQueenside) {
         const Square rook_from = {
-            static_cast<uint8_t>(to.file == 6 ? 7 : 0),
-            from.rank,
+            static_cast<uint8_t>(
+                move.kind == MoveKind::CastleKingside ? 7 : 0
+            ),
+            move.from.rank,
         };
         const Square rook_to = {
-            static_cast<uint8_t>(to.file == 6 ? 5 : 3),
-            from.rank,
+            static_cast<uint8_t>(
+                move.kind == MoveKind::CastleKingside ? 5 : 3
+            ),
+            move.from.rank,
         };
         board_[rook_to.rank][rook_to.file] = board_[rook_from.rank][rook_from.file];
         board_[rook_from.rank][rook_from.file] = EMPTY;
     }
 
-    board_[to.rank][to.file] = piece == 'P' && to.rank == 7 ? 'Q' : piece;
-    board_[from.rank][from.file] = EMPTY;
+    if (move.kind == MoveKind::EnPassant) {
+        board_[move.from.rank][move.to.file] = EMPTY;
+    }
+
+    char placed_piece = moving_piece;
+    if (move.promotion != '\0') {
+        placed_piece = colorOf(moving_piece) == Color::White
+            ? move.promotion
+            : static_cast<char>(move.promotion - 'A' + 'a');
+    }
+    board_[move.to.rank][move.to.file] = placed_piece;
+    board_[move.from.rank][move.from.file] = EMPTY;
+
+    en_passant_file_ = move.kind == MoveKind::DoublePawnPush
+        ? static_cast<int8_t>(move.from.file)
+        : -1;
+    side_to_move_ = opposite(side_to_move_);
+}
+
+void ChessBoard::loadPosition(
+    const char* const ranks[8],
+    Color side_to_move,
+    bool white_kingside,
+    bool white_queenside,
+    bool black_kingside,
+    bool black_queenside,
+    int en_passant_file
+)
+{
+    for (uint8_t rank = 0; rank < 8; ++rank) {
+        memcpy(board_[rank], ranks[rank], 8);
+    }
+    side_to_move_ = side_to_move;
+    white_kingside_ = white_kingside;
+    white_queenside_ = white_queenside;
+    black_kingside_ = black_kingside;
+    black_queenside_ = black_queenside;
+    en_passant_file_ = static_cast<int8_t>(en_passant_file);
 }

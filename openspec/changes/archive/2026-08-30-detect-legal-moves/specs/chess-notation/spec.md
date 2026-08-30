@@ -1,16 +1,4 @@
-# chess-notation Specification
-
-## Purpose
-TBD - created by archiving change create-chess-task. Update Purpose after archive.
-## Requirements
-### Requirement: Board holds the standard starting position
-
-The system SHALL maintain an 8×8 board. On startup and after a reset the board SHALL hold the standard chess starting position: White rooks on a1 and h1, knights on b1 and g1, bishops on c1 and f1, the queen on d1, the king on e1, White pawns across rank 2; the mirrored Black pieces on rank 8 with Black pawns across rank 7; ranks 3 through 6 empty.
-
-#### Scenario: Starting placement
-
-- **WHEN** the board is initialised or reset
-- **THEN** e1 holds the White king, d1 the White queen, e2 a White pawn, g8 a Black knight, and e4 is empty
+## MODIFIED Requirements
 
 ### Requirement: A completed move updates the board
 
@@ -35,20 +23,6 @@ Applying an accepted move SHALL move the piece from the from-square to the to-sq
 
 - **WHEN** a move is rejected as illegal
 - **THEN** every square holds what it held before the entry
-
-### Requirement: Pawn moves are written as the destination square
-
-A pawn move that is not a capture SHALL be rendered as the destination square alone, with no piece letter.
-
-#### Scenario: Pawn advance
-
-- **WHEN** e2e4 is played from the starting position
-- **THEN** the notation is `e4`
-
-#### Scenario: Single-step pawn advance
-
-- **WHEN** d2d3 is played from the starting position
-- **THEN** the notation is `d3`
 
 ### Requirement: Non-pawn moves carry the piece letter
 
@@ -144,20 +118,6 @@ A pawn moving to the last rank SHALL be replaced on the board by the piece the p
 - **WHEN** a promotion leaves the enemy king attacked with a reply available
 - **THEN** the notation ends with `=` the piece letter followed by `+`
 
-### Requirement: Accepted moves are numbered from 1
-
-Each accepted move SHALL be assigned the next move number, starting at 1 for the first move after startup or reset and incrementing by one per accepted move. Rejected moves SHALL NOT consume a number.
-
-#### Scenario: Numbering increments
-
-- **WHEN** e2e4 is played, then g1f3
-- **THEN** the first is numbered 1 and the second is numbered 2
-
-#### Scenario: Rejected move keeps the number
-
-- **WHEN** a move is rejected and then a valid move is entered
-- **THEN** the valid move takes the number the rejected move would have had
-
 ### Requirement: Each accepted move prints one line to standard output
 
 An accepted move SHALL print one line containing the four-character coordinate form, a space, `=`, a space, then the move number, a period, a space, and the algebraic notation. When that move ends the game, a further result line SHALL follow it. No other line SHALL be printed for an accepted move.
@@ -176,6 +136,8 @@ An accepted move SHALL print one line containing the four-character coordinate f
 
 - **WHEN** an accepted move delivers checkmate
 - **THEN** the move line is followed by a line reporting the result
+
+## ADDED Requirements
 
 ### Requirement: Identical pieces are disambiguated
 
@@ -269,3 +231,16 @@ A move rejected as illegal SHALL print one line containing the four-character co
 - **WHEN** castling is refused
 - **THEN** the line distinguishes lost rights, a blocked path, and an attacked square
 
+## REMOVED Requirements
+
+### Requirement: A move from an empty square is rejected
+
+**Reason**: The empty from-square is one legality rule among many now, so it moves to the new `chess-move-legality` capability alongside turn order, movement rules, and king safety, where the rejection reasons are specified together.
+
+**Migration**: The behaviour is unchanged apart from the message wording, which becomes `illegal: empty from-square` in place of `invalid: empty from-square`. See the requirement of the same name in `chess-move-legality`.
+
+### Requirement: Move legality is not verified
+
+**Reason**: This change exists to verify legality, so the requirement states the opposite of the intended behaviour. Its notation clauses are replaced by the new disambiguation and check-suffix requirements.
+
+**Migration**: Callers that relied on any occupied from-square being accepted must now enter legal moves. Moves that break a movement rule, ignore turn order, or leave the mover's king in check are rejected and the board is unchanged; see `chess-move-legality`. Notation now includes disambiguation and `+`/`#` suffixes.

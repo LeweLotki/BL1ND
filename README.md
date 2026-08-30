@@ -7,11 +7,12 @@ board preview for an arbiter or spectator.
 
 ## Features
 
-- Four-key coordinate move entry, such as `5254` for `e2e4`
+- Four-key coordinate move entry, plus a promotion choice when needed
 - In-memory chessboard initialized to the standard starting position
-- Algebraic-style notation for piece moves, captures, castling, and promotion
+- Legal-move validation with turn order, king safety, castling, and en passant
+- Standard algebraic notation including disambiguation, check, and checkmate
 - Numbered move output over the serial console
-- LED confirmation for accepted moves
+- Distinct LED confirmation and rejection patterns
 - One-key game reset
 - Self-refreshing, phone-sized board preview over an ESP32 Wi-Fi access point
 - Host-side tests for the platform-independent chess and HTML-rendering code
@@ -54,18 +55,33 @@ Examples:
 7163 -> g1f3
 ```
 
-After the fourth valid digit, the move is applied and printed:
+After the fourth valid digit, a legal move is applied and printed:
 
 ```text
 e2e4 = 1. e4
 g1f3 = 2. Nf3
 ```
 
-The LED blinks once for an accepted move. A move from an empty square is
-rejected without changing the board or consuming a move number:
+If a pawn legally reaches its last rank, the board waits for a fifth key:
+`A` chooses a queen, `B` a rook, `C` a bishop, and `D` a knight. For example,
+after entering the four digits for `b7a8`, press `D` to complete `bxa8=N`.
+Other keys are ignored while the choice is pending; `*` still resets the game.
+
+The LED blinks once slowly for an accepted move and three times rapidly for a
+rejected move. A rejection does not change the board, consume a move number,
+or discard an available en passant capture. The serial line names the reason:
 
 ```text
-e4e5 = invalid: empty from-square
+e4e5 = illegal: empty from-square
+a1a5 = illegal: path to a5 is blocked
+```
+
+Checkmate and stalemate add a result line:
+
+```text
+d8h4 = 4. Qh4#
+Checkmate: Black wins
+Stalemate: draw
 ```
 
 Press `*` at any time to restore the starting position, reset move numbering
@@ -96,18 +112,20 @@ console and keypad play continues.
 
 ## Chess behavior and limitations
 
-This project tracks piece placement and formats moves; it is not a chess rules
-engine.
+The firmware enforces normal piece movement, blocking, captures, turn order,
+king safety, castling rights and attacked paths, en passant, and promotion for
+both colours. It detects checkmate and stalemate, then refuses further moves
+until reset. SAN output includes legal-move disambiguation and `+`/`#`.
 
-- Any move with a non-empty source square is accepted.
-- Piece movement, turn order, check, checkmate, pins, and castling rights are
-  not validated.
-- Moving onto an occupied square removes the existing piece, regardless of
-  color.
-- Algebraic output does not include disambiguation, `+`, or `#`.
-- A king moving two files from its home square is treated as castling and also
-  moves the corresponding rook.
-- A White pawn reaching rank 8 is automatically promoted to a queen.
+It does not detect draws by threefold repetition, the fifty-move rule, or
+insufficient material. It also has no position-entry mode; positions must be
+reached by replaying legal moves from the start. The device is a practice aid,
+not an arbiter of last resort.
+
+The accepted/rejected LED signal reveals whether a proposed move is legal,
+which is information a blindfold player is normally expected to retain.
+Rejected attempts and their reasons are logged to the serial console so an
+arbiter can review possible probing.
 
 ## Building and flashing
 
@@ -151,7 +169,8 @@ ctest --test-dir build-host --output-on-failure
 src/
 ├── main.cpp              Application wiring and FreeRTOS task startup
 ├── main.hpp
-├── game_logic/           Board state, move entry, and notation
+├── game_logic/           Board state, rules, SAN, and move entry
+│   └── pieces/           One allocation-free movement class per piece kind
 ├── peripherals/          Keypad, LED, and queued serial output
 └── server/               Wi-Fi AP, board snapshot, HTTP server, and HTML page
 tests/                    Host-side unit tests
